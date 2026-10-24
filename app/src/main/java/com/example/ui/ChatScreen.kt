@@ -850,11 +850,37 @@ private fun EngineStatusBanner(
                     }
                 }
                 is EngineStatus.Unloaded -> {
-                    Text(
-                        text = "Select a model first",
-                        fontSize = 11.sp,
-                        color = TextTertiary
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (lastUsedModel != null) "No model loaded • Last: ${lastUsedModel.name}" else "No model loaded — Select a model first",
+                            fontSize = 11.sp,
+                            color = TextTertiary,
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (lastUsedModel != null) {
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Button(
+                                onClick = onLoadLastModel,
+                                colors = ButtonDefaults.buttonColors(containerColor = AccentMint),
+                                shape = RoundedCornerShape(6.dp),
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                                modifier = Modifier
+                                    .height(28.dp)
+                                    .testTag("banner_load_last_model_button")
+                            ) {
+                                Text(
+                                    text = "Load last model",
+                                    color = Color.Black,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
                 }
                 is EngineStatus.Error -> {
                     Text(

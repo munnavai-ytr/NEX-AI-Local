@@ -1,13 +1,17 @@
 package com.example.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.StatFs
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -29,8 +33,10 @@ import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -42,15 +48,11 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
-import androidx.compose.material3.TabRowDefaults
-import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -63,10 +65,14 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.ModelEntity
+import com.example.data.StarterCatalogModel
+import com.example.data.StarterModelCatalog
 import com.example.inference.EngineStatus
 import com.example.ui.theme.AccentAmber
 import com.example.ui.theme.AccentBlue
@@ -83,30 +89,6 @@ import com.example.util.FitLevel
 import com.example.util.ImportProgress
 import com.example.util.RamFitChecker
 
-data class CuratedModel(
-    val name: String,
-    val approximateSize: String,
-    val description: String
-)
-
-private val CURATED_MODELS = listOf(
-    CuratedModel(
-        name = "Gemma 3 1B",
-        approximateSize = "~1.2 GB",
-        description = "Lightweight mobile reasoning model developed by Google DeepMind with high token throughput."
-    ),
-    CuratedModel(
-        name = "Qwen 2.5 1.5B",
-        approximateSize = "~1.6 GB",
-        description = "Advanced instruction-tuned coding and conversational reasoning edge model."
-    ),
-    CuratedModel(
-        name = "Gemma 4 E2B",
-        approximateSize = "~2.1 GB",
-        description = "High-efficiency edge architecture balancing developer assistance and low memory footprint."
-    )
-)
-
 @Composable
 fun ModelsScreen(
     viewModel: MainViewModel,
@@ -119,11 +101,11 @@ fun ModelsScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    var selectedSectionTab by remember { mutableIntStateOf(0) } // 0: Local Models, 1: Download & Curated
+    val wifiOnly by viewModel.wifiOnlyDownload.collectAsStateWithLifecycle()
 
     // Storage calculation
     val totalModelsSizeBytes = models.sumOf { it.sizeBytes }
-    val statFs = remember { StatFs(context.filesDir.path) }
+    val statFs = remember(models.size, downloadState) { StatFs(context.filesDir.path) }
     val freeStorageBytes = statFs.availableBytes
 
     // SAF File Picker Launcher
@@ -132,6 +114,25 @@ fun ModelsScreen(
     ) { uri ->
         if (uri != null) {
             viewModel.importModelFromUri(uri)
+        }
+    }
+
+    // Optional notification permission launcher for Android 13+ background download notification
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { _ ->
+        // Foreground download service proceeds regardless of whether notification permission was granted
+    }
+
+    fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val granted = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!granted) {
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
         }
     }
 
@@ -175,21 +176,34 @@ fun ModelsScreen(
             )
         }
 
+        // Wi-Fi Only Switch & Background Download Notice
+        item {
+            WifiOnlySettingCard(
+                wifiOnly = wifiOnly,
+                onWifiOnlyChanged = { viewModel.setWifiOnlyDownload(it) }
+            )
+        }
+
         // Import Progress Bar (if importing via SAF)
         if (importProgress != null) {
             item {
                 Surface(
                     color = DarkSurface,
                     shape = RoundedCornerShape(10.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, AccentBlue),
+                    border = BorderStroke(1.dp, AccentBlue),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(modifier = Modifier.padding(14.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.FileUpload, contentDescription = null, tint = AccentBlue, modifier = Modifier.size(18.dp))
+                            Icon(
+                                Icons.Default.FileUpload,
+                                contentDescription = null,
+                                tint = AccentBlue,
+                                modifier = Modifier.size(18.dp)
+                            )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Importing ${importProgress.fileName}...",
+                                text = "Copying ${importProgress.fileName} to private models folder...",
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = TextPrimary
@@ -217,160 +231,639 @@ fun ModelsScreen(
             }
         }
 
-        // Download Progress Bar / Active Card (if downloading)
+        // Active / Failed / Completed Download Status Card
         if (downloadState !is DownloadState.Idle) {
             item {
                 DownloadStatusCard(
                     downloadState = downloadState,
                     onPause = { viewModel.pauseDownload() },
-                    onResume = { viewModel.resumeDownload() },
-                    onCancel = { viewModel.cancelDownload() }
-                )
-            }
-        }
-
-        // Navigation Tabs for Subsections
-        item {
-            TabRow(
-                selectedTabIndex = selectedSectionTab,
-                containerColor = DarkSurface,
-                contentColor = AccentBlue,
-                indicator = { tabPositions ->
-                    TabRowDefaults.SecondaryIndicator(
-                        modifier = Modifier.tabIndicatorOffset(tabPositions[selectedSectionTab]),
-                        color = AccentBlue
-                    )
-                },
-                modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .border(1.dp, DarkCardBorder, RoundedCornerShape(8.dp))
-            ) {
-                Tab(
-                    selected = selectedSectionTab == 0,
-                    onClick = { selectedSectionTab = 0 },
-                    text = {
-                        Text(
-                            "My Models (${models.size})",
-                            fontSize = 13.sp,
-                            fontWeight = if (selectedSectionTab == 0) FontWeight.Bold else FontWeight.Normal,
-                            color = if (selectedSectionTab == 0) AccentBlue else TextSecondary
-                        )
-                    }
-                )
-                Tab(
-                    selected = selectedSectionTab == 1,
-                    onClick = { selectedSectionTab = 1 },
-                    text = {
-                        Text(
-                            "Download & Curated",
-                            fontSize = 13.sp,
-                            fontWeight = if (selectedSectionTab == 1) FontWeight.Bold else FontWeight.Normal,
-                            color = if (selectedSectionTab == 1) AccentBlue else TextSecondary
-                        )
-                    }
-                )
-            }
-        }
-
-        if (selectedSectionTab == 0) {
-            // SECTION: Local Models & SAF Import
-            item {
-                Button(
-                    onClick = {
-                        filePickerLauncher.launch(arrayOf("*/*"))
+                    onResume = {
+                        requestNotificationPermissionIfNeeded()
+                        viewModel.resumeDownload()
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = AccentBlue),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp)
-                        .testTag("import_file_button")
-                ) {
-                    Icon(Icons.Default.FileUpload, contentDescription = null, tint = Color.Black, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        "Import .litertlm File (Storage Access Framework)",
-                        color = Color.Black,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp
-                    )
-                }
-            }
-
-            if (models.isEmpty()) {
-                item {
-                    Surface(
-                        color = DarkSurfaceVariant,
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(20.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Icon(Icons.Default.Storage, contentDescription = null, tint = TextTertiary, modifier = Modifier.size(32.dp))
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = "No models in app storage yet",
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = TextPrimary
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "Tap 'Import .litertlm File' to select a local model, or switch to the 'Download & Curated' tab to download one via direct URL.",
-                                fontSize = 12.sp,
-                                color = TextSecondary,
-                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                            )
-                        }
-                    }
-                }
-            } else {
-                items(models, key = { it.id }) { model ->
-                    ModelItemCard(
-                        model = model,
-                        isCurrentlyLoaded = engineStatus is EngineStatus.Ready && (engineStatus as EngineStatus.Ready).modelName == model.name,
-                        isEngineBusy = engineStatus is EngineStatus.Initializing,
-                        onLoad = { viewModel.loadModel(model.filePath) },
-                        onUnload = { viewModel.unloadModel() },
-                        onDelete = { viewModel.deleteModel(model) }
-                    )
-                }
-            }
-        } else {
-            // SECTION: Direct URL Downloader & Curated Models
-            item {
-                UrlDownloaderCard(
-                    hasHfToken = hasHfToken,
-                    onSaveToken = { viewModel.saveHfToken(it) },
-                    onStartDownload = { url, name -> viewModel.startDownload(url, name) }
+                    onRetry = {
+                        requestNotificationPermissionIfNeeded()
+                        viewModel.retryDownload()
+                    },
+                    onCancel = { viewModel.cancelDownload(deletePartial = false) },
+                    onDiscardPartial = { viewModel.cancelDownload(deletePartial = true) }
                 )
             }
+        }
 
-            item {
+        // SECTION 1: STARTER CATALOG WITH ONE-TAP INSTALL
+        item {
+            Column {
                 Text(
-                    text = "Recommended Curated Models",
+                    text = "Starter Catalog (One-Tap Install)",
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,
                     color = TextPrimary
                 )
+                Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = "Fill in your direct .litertlm download link for each model.",
+                    text = "Tap Install to automatically download and register the model. No Hugging Face token is required for these models, and downloads continue in the background if you close the app.",
                     fontSize = 12.sp,
+                    color = TextSecondary,
+                    lineHeight = 16.sp
+                )
+            }
+        }
+
+        items(StarterModelCatalog.MODELS, key = { it.id }) { catalogModel ->
+            val installedModel = models.firstOrNull {
+                it.filePath.endsWith("/${catalogModel.fileName}", ignoreCase = true) ||
+                    it.downloadUrl.equals(catalogModel.downloadUrl, ignoreCase = true) ||
+                    it.name.equals(catalogModel.name, ignoreCase = true) ||
+                    it.name.equals(catalogModel.fileName, ignoreCase = true)
+            }
+            val isLoaded = installedModel != null && (
+                installedModel.isLoaded ||
+                    (engineStatus is EngineStatus.Ready &&
+                        (engineStatus.modelName == installedModel.name || engineStatus.modelName == catalogModel.fileName))
+                )
+
+            StarterCatalogModelCard(
+                catalogModel = catalogModel,
+                installedModel = installedModel,
+                isCurrentlyLoaded = isLoaded,
+                isEngineBusy = engineStatus is EngineStatus.Initializing,
+                downloadState = downloadState,
+                onInstall = {
+                    requestNotificationPermissionIfNeeded()
+                    viewModel.installStarterModel(catalogModel)
+                },
+                onPause = { viewModel.pauseDownload() },
+                onResume = {
+                    requestNotificationPermissionIfNeeded()
+                    viewModel.resumeDownload()
+                },
+                onRetry = {
+                    requestNotificationPermissionIfNeeded()
+                    viewModel.retryDownload()
+                },
+                onCancel = { viewModel.cancelDownload(deletePartial = false) },
+                onLoadInstalled = {
+                    if (installedModel != null) {
+                        viewModel.loadModel(installedModel.filePath)
+                    }
+                },
+                onUnloadInstalled = { viewModel.unloadModel() }
+            )
+        }
+
+        // SECTION 2: INSTALLED MODELS & SAF FILE IMPORT
+        item {
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        text = "My Installed Models (${models.size})",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary
+                    )
+                    Text(
+                        text = "Stored in private app storage (/files/models)",
+                        fontSize = 11.sp,
+                        color = TextSecondary
+                    )
+                }
+            }
+        }
+
+        item {
+            Button(
+                onClick = {
+                    filePickerLauncher.launch(arrayOf("*/*"))
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = AccentBlue),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .testTag("import_file_button")
+            ) {
+                Icon(
+                    Icons.Default.FileUpload,
+                    contentDescription = null,
+                    tint = Color.Black,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    "Import .litertlm File (System File Picker)",
+                    color = Color.Black,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp
+                )
+            }
+        }
+
+        if (models.isEmpty()) {
+            item {
+                Surface(
+                    color = DarkSurfaceVariant,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(20.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            Icons.Default.Storage,
+                            contentDescription = null,
+                            tint = TextTertiary,
+                            modifier = Modifier.size(32.dp)
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "No models installed yet",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = TextPrimary
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Tap 'Install' on any model in the Starter Catalog above, import a .litertlm file from your device, or download from a direct URL below.",
+                            fontSize = 12.sp,
+                            color = TextSecondary,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+            }
+        } else {
+            items(models, key = { it.id }) { model ->
+                ModelItemCard(
+                    model = model,
+                    isCurrentlyLoaded = engineStatus is EngineStatus.Ready &&
+                        (engineStatus.modelName == model.name || model.filePath.endsWith("/${engineStatus.modelName}")),
+                    isEngineBusy = engineStatus is EngineStatus.Initializing,
+                    onSelect = { viewModel.selectModel(model.filePath) },
+                    onLoad = { viewModel.loadModel(model.filePath) },
+                    onUnload = { viewModel.unloadModel() },
+                    onDelete = { viewModel.deleteModel(model) }
+                )
+            }
+        }
+
+        // SECTION 3: CUSTOM URL DOWNLOAD & OPTIONAL TOKEN FOR FUTURE GATED MODELS
+        item {
+            Spacer(modifier = Modifier.height(4.dp))
+            UrlDownloaderCard(
+                hasHfToken = hasHfToken,
+                onSaveToken = { viewModel.saveHfToken(it) },
+                onStartDownload = { url, name ->
+                    requestNotificationPermissionIfNeeded()
+                    viewModel.startDownload(url, name)
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun WifiOnlySettingCard(
+    wifiOnly: Boolean,
+    onWifiOnlyChanged: (Boolean) -> Unit
+) {
+    Surface(
+        color = DarkSurface,
+        shape = RoundedCornerShape(10.dp),
+        border = BorderStroke(1.dp, DarkCardBorder),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f)
+            ) {
+                Icon(
+                    Icons.Default.Wifi,
+                    contentDescription = null,
+                    tint = if (wifiOnly) AccentMint else TextTertiary,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Column {
+                    Text(
+                        text = "Wi-Fi only downloads",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = TextPrimary
+                    )
+                    Text(
+                        text = "Prevents large model downloads over mobile data. Downloads continue in the background when the app is closed.",
+                        fontSize = 11.sp,
+                        color = TextSecondary,
+                        lineHeight = 15.sp
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Switch(
+                checked = wifiOnly,
+                onCheckedChange = onWifiOnlyChanged,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Color.Black,
+                    checkedTrackColor = AccentMint,
+                    uncheckedThumbColor = TextSecondary,
+                    uncheckedTrackColor = DarkSurfaceVariant
+                ),
+                modifier = Modifier.testTag("wifi_only_switch")
+            )
+        }
+    }
+}
+
+@Composable
+private fun StarterCatalogModelCard(
+    catalogModel: StarterCatalogModel,
+    installedModel: ModelEntity?,
+    isCurrentlyLoaded: Boolean,
+    isEngineBusy: Boolean,
+    downloadState: DownloadState,
+    onInstall: () -> Unit,
+    onPause: () -> Unit,
+    onResume: () -> Unit,
+    onRetry: () -> Unit,
+    onCancel: () -> Unit,
+    onLoadInstalled: () -> Unit,
+    onUnloadInstalled: () -> Unit
+) {
+    val context = LocalContext.current
+    val fit = RamFitChecker.evaluate(context, catalogModel.approximateSizeBytes)
+    val fitColor = when (fit.level) {
+        FitLevel.OPTIMAL -> AccentMint
+        FitLevel.TIGHT -> AccentAmber
+        FitLevel.CRITICAL -> AccentRed
+    }
+
+    val isThisModelChecking = downloadState is DownloadState.Checking &&
+        (downloadState.fileName.equals(catalogModel.fileName, ignoreCase = true) ||
+            downloadState.url.equals(catalogModel.downloadUrl, ignoreCase = true))
+
+    val activeProgress = (downloadState as? DownloadState.Progress)?.takeIf {
+        it.fileName.equals(catalogModel.fileName, ignoreCase = true) ||
+            it.url.equals(catalogModel.downloadUrl, ignoreCase = true)
+    }
+
+    val activeError = (downloadState as? DownloadState.Error)?.takeIf {
+        it.fileName.equals(catalogModel.fileName, ignoreCase = true) ||
+            it.url.equals(catalogModel.downloadUrl, ignoreCase = true)
+    }
+
+    Surface(
+        color = DarkSurface,
+        shape = RoundedCornerShape(10.dp),
+        border = BorderStroke(
+            1.dp,
+            when {
+                installedModel != null -> AccentMint.copy(alpha = 0.6f)
+                activeError != null -> AccentRed.copy(alpha = 0.7f)
+                activeProgress != null || isThisModelChecking -> AccentBlue
+                else -> DarkCardBorder
+            }
+        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("starter_card_${catalogModel.id}")
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        text = catalogModel.name,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary
+                    )
+                    Surface(
+                        color = DarkSurfaceVariant,
+                        shape = RoundedCornerShape(4.dp),
+                        border = BorderStroke(1.dp, AccentBlue.copy(alpha = 0.6f))
+                    ) {
+                        Text(
+                            text = catalogModel.tier,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = AccentBlue,
+                            fontFamily = FontFamily.Monospace,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+                Text(
+                    text = catalogModel.approximateSize,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = AccentMint,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Text(
+                text = catalogModel.description,
+                fontSize = 12.sp,
+                color = TextSecondary,
+                lineHeight = 16.sp
+            )
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Text(
+                text = "Min RAM: ${"%.0f".format(catalogModel.minRamGb)} GB • Task: ${catalogModel.task} • License: ${catalogModel.license}",
+                fontSize = 11.sp,
+                color = TextTertiary,
+                fontFamily = FontFamily.Monospace
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // RAM Fit Badge
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(fitColor)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "[${fit.badgeLabel}] ${fit.explanation}",
+                    fontSize = 11.sp,
                     color = TextSecondary
                 )
             }
 
-            item {
-                CuratedCommunityNoteCard()
-            }
+            Spacer(modifier = Modifier.height(10.dp))
 
-            items(CURATED_MODELS) { curated ->
-                CuratedModelCard(
-                    curated = curated,
-                    onStartDownload = { url -> viewModel.startDownload(url, "${curated.name.lowercase().replace(" ", "_")}.litertlm") }
-                )
+            when {
+                // Case 1: Already installed in Room
+                installedModel != null -> {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Default.Check,
+                                contentDescription = null,
+                                tint = AccentMint,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "Installed in local storage",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = AccentMint
+                            )
+                        }
+
+                        if (isCurrentlyLoaded) {
+                            OutlinedButton(
+                                onClick = onUnloadInstalled,
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentRed),
+                                border = BorderStroke(1.dp, AccentRed.copy(alpha = 0.5f)),
+                                shape = RoundedCornerShape(6.dp),
+                                modifier = Modifier.height(34.dp)
+                            ) {
+                                Text("Unload", fontSize = 11.sp)
+                            }
+                        } else {
+                            Button(
+                                onClick = onLoadInstalled,
+                                enabled = !isEngineBusy,
+                                colors = ButtonDefaults.buttonColors(containerColor = AccentMint),
+                                shape = RoundedCornerShape(6.dp),
+                                modifier = Modifier.height(34.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.PlayArrow,
+                                    contentDescription = null,
+                                    tint = Color.Black,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    "Load Model",
+                                    color = Color.Black,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Case 2: Checking server / storage for this model
+                isThisModelChecking -> {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(
+                            color = AccentBlue,
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = (downloadState as DownloadState.Checking).message,
+                            fontSize = 12.sp,
+                            color = TextSecondary
+                        )
+                    }
+                }
+
+                // Case 3: Actively downloading or paused for this model
+                activeProgress != null -> {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        LinearProgressIndicator(
+                            progress = { activeProgress.percent / 100f },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(6.dp)
+                                .clip(RoundedCornerShape(3.dp)),
+                            color = if (activeProgress.isPaused) AccentAmber else AccentBlue,
+                            trackColor = DarkSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            val dlMb = activeProgress.downloadedBytes / (1024.0 * 1024.0)
+                            val totMb = activeProgress.totalBytes / (1024.0 * 1024.0)
+                            val progressLabel = if (activeProgress.totalBytes > 0) {
+                                "%.1f / %.1f MB (%d%%)".format(dlMb, totMb, activeProgress.percent)
+                            } else {
+                                "%.1f MB".format(dlMb)
+                            }
+                            Text(
+                                text = if (activeProgress.isPaused) {
+                                    "$progressLabel • Paused"
+                                } else {
+                                    "$progressLabel • ${activeProgress.formattedSpeed} • ETA ${activeProgress.formattedEta}"
+                                },
+                                fontSize = 11.sp,
+                                color = if (activeProgress.isPaused) AccentAmber else TextSecondary,
+                                fontFamily = FontFamily.Monospace
+                            )
+
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                if (activeProgress.isPaused) {
+                                    Button(
+                                        onClick = onResume,
+                                        colors = ButtonDefaults.buttonColors(containerColor = AccentMint),
+                                        shape = RoundedCornerShape(6.dp),
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                                        modifier = Modifier.height(30.dp)
+                                    ) {
+                                        Text(
+                                            "Resume",
+                                            color = Color.Black,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                } else {
+                                    OutlinedButton(
+                                        onClick = onPause,
+                                        shape = RoundedCornerShape(6.dp),
+                                        border = BorderStroke(1.dp, AccentAmber),
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                                        modifier = Modifier.height(30.dp)
+                                    ) {
+                                        Text("Pause", color = AccentAmber, fontSize = 11.sp)
+                                    }
+                                    OutlinedButton(
+                                        onClick = onCancel,
+                                        shape = RoundedCornerShape(6.dp),
+                                        border = BorderStroke(1.dp, AccentRed.copy(alpha = 0.5f)),
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                                        modifier = Modifier.height(30.dp)
+                                    ) {
+                                        Text("Cancel", color = AccentRed, fontSize = 11.sp)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Case 4: Download failed for this model — show reason and Retry button that resumes
+                activeError != null -> {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Surface(
+                            color = DarkSurfaceVariant,
+                            shape = RoundedCornerShape(6.dp),
+                            border = BorderStroke(1.dp, AccentRed.copy(alpha = 0.5f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Default.Warning,
+                                    contentDescription = null,
+                                    tint = AccentRed,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = activeError.message,
+                                    fontSize = 11.sp,
+                                    color = AccentRed,
+                                    lineHeight = 15.sp,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End
+                        ) {
+                            Button(
+                                onClick = onRetry,
+                                colors = ButtonDefaults.buttonColors(containerColor = AccentAmber),
+                                shape = RoundedCornerShape(6.dp),
+                                modifier = Modifier
+                                    .height(34.dp)
+                                    .testTag("retry_starter_${catalogModel.id}")
+                            ) {
+                                Icon(
+                                    Icons.Default.Refresh,
+                                    contentDescription = null,
+                                    tint = Color.Black,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    "Retry (Resume)",
+                                    color = Color.Black,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Case 5: Not installed — show one-tap Install button
+                else -> {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        Button(
+                            onClick = onInstall,
+                            colors = ButtonDefaults.buttonColors(containerColor = AccentMint),
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier
+                                .height(36.dp)
+                                .testTag("install_starter_${catalogModel.id}")
+                        ) {
+                            Icon(
+                                Icons.Default.CloudDownload,
+                                contentDescription = null,
+                                tint = Color.Black,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                "Install",
+                                color = Color.Black,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -388,7 +881,7 @@ private fun StorageOverviewCard(
     Surface(
         color = DarkSurface,
         shape = RoundedCornerShape(10.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, DarkCardBorder),
+        border = BorderStroke(1.dp, DarkCardBorder),
         modifier = Modifier.fillMaxWidth()
     ) {
         Row(
@@ -399,7 +892,7 @@ private fun StorageOverviewCard(
             Spacer(modifier = Modifier.width(10.dp))
             Column {
                 Text(
-                    text = "Total Models Storage: $totalDisplay",
+                    text = "Total Storage Used by Models: $totalDisplay",
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = TextPrimary
@@ -431,7 +924,7 @@ private fun ActiveLoadedModelCard(
     Surface(
         color = DarkSurface,
         shape = RoundedCornerShape(12.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, borderColor),
+        border = BorderStroke(1.dp, borderColor),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -466,9 +959,9 @@ private fun ActiveLoadedModelCard(
                     OutlinedButton(
                         onClick = onUnload,
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentRed),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, AccentRed.copy(alpha = 0.5f)),
+                        border = BorderStroke(1.dp, AccentRed.copy(alpha = 0.5f)),
                         shape = RoundedCornerShape(6.dp),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                         modifier = Modifier
                             .height(28.dp)
                             .testTag("unload_active_model_button")
@@ -556,6 +1049,7 @@ private fun ModelItemCard(
     model: ModelEntity,
     isCurrentlyLoaded: Boolean,
     isEngineBusy: Boolean,
+    onSelect: () -> Unit,
     onLoad: () -> Unit,
     onUnload: () -> Unit,
     onDelete: () -> Unit
@@ -574,9 +1068,13 @@ private fun ModelItemCard(
     Surface(
         color = DarkSurface,
         shape = RoundedCornerShape(10.dp),
-        border = androidx.compose.foundation.BorderStroke(
+        border = BorderStroke(
             1.dp,
-            if (isCurrentlyLoaded) AccentMint.copy(alpha = 0.6f) else DarkCardBorder
+            when {
+                isCurrentlyLoaded -> AccentMint.copy(alpha = 0.6f)
+                model.isLastUsed -> AccentBlue.copy(alpha = 0.6f)
+                else -> DarkCardBorder
+            }
         ),
         modifier = Modifier.fillMaxWidth()
     ) {
@@ -586,26 +1084,70 @@ private fun ModelItemCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(modifier = Modifier.weight(1f)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = model.name,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary
+                        )
+                        Surface(
+                            color = DarkSurfaceVariant,
+                            shape = RoundedCornerShape(4.dp),
+                            border = BorderStroke(1.dp, AccentBlue.copy(alpha = 0.5f))
+                        ) {
+                            Text(
+                                text = model.tier,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = AccentBlue,
+                                fontFamily = FontFamily.Monospace,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                        Surface(
+                            color = DarkSurfaceVariant,
+                            shape = RoundedCornerShape(4.dp)
+                        ) {
+                            Text(
+                                text = model.task.uppercase(),
+                                fontSize = 10.sp,
+                                color = TextSecondary,
+                                fontFamily = FontFamily.Monospace,
+                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(3.dp))
                     Text(
-                        text = model.name,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = TextPrimary
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = "$sizeDisplay • ${model.filePath}",
+                        text = buildString {
+                            append("$sizeDisplay • Min ${"%.1f".format(model.minRamGb)} GB / Rec ${"%.1f".format(model.recommendedRamGb)} GB RAM")
+                            if (model.measuredTokensPerSecond > 0.0) {
+                                append(" • Measured: ${"%.1f".format(model.measuredTokensPerSecond)} tok/s")
+                            }
+                        },
                         fontSize = 11.sp,
-                        color = TextTertiary,
-                        fontFamily = FontFamily.Monospace,
-                        maxLines = 1
+                        color = TextSecondary,
+                        fontFamily = FontFamily.Monospace
                     )
+                    if (model.licenseNote.isNotBlank()) {
+                        Text(
+                            text = "License: ${model.licenseNote}${if (model.requiresLicenseAcceptance) " (Requires acceptance)" else ""}",
+                            fontSize = 10.sp,
+                            color = TextTertiary
+                        )
+                    }
                 }
 
                 // Delete Button
                 IconButton(
                     onClick = onDelete,
-                    modifier = Modifier.size(36.dp)
+                    modifier = Modifier
+                        .size(36.dp)
+                        .testTag("delete_model_${model.id}")
                 ) {
                     Icon(Icons.Default.Delete, contentDescription = "Delete", tint = AccentRed, modifier = Modifier.size(18.dp))
                 }
@@ -649,39 +1191,64 @@ private fun ModelItemCard(
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (isCurrentlyLoaded) {
+                // Select (set as default/last-used) button
+                if (model.isLastUsed) {
                     Text(
-                        text = "Active in RAM",
-                        fontSize = 12.sp,
+                        text = "✓ Selected (Last Used)",
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = AccentMint,
-                        modifier = Modifier.padding(end = 8.dp)
+                        color = AccentBlue
                     )
-                    OutlinedButton(
-                        onClick = onUnload,
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentRed),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, AccentRed.copy(alpha = 0.5f)),
-                        shape = RoundedCornerShape(6.dp),
-                        modifier = Modifier.height(34.dp)
-                    ) {
-                        Text("Unload", fontSize = 11.sp)
-                    }
                 } else {
-                    Button(
-                        onClick = onLoad,
-                        enabled = !isEngineBusy,
-                        colors = ButtonDefaults.buttonColors(containerColor = AccentMint),
+                    OutlinedButton(
+                        onClick = onSelect,
                         shape = RoundedCornerShape(6.dp),
+                        border = BorderStroke(1.dp, DarkCardBorder),
                         modifier = Modifier
                             .height(34.dp)
-                            .testTag("load_model_${model.id}")
+                            .testTag("select_model_${model.id}")
                     ) {
-                        Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.Black, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Load Model", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("Select", fontSize = 11.sp, color = TextSecondary)
+                    }
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (isCurrentlyLoaded) {
+                        Text(
+                            text = "Active in RAM",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = AccentMint,
+                            modifier = Modifier.padding(end = 8.dp)
+                        )
+                        OutlinedButton(
+                            onClick = onUnload,
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentRed),
+                            border = BorderStroke(1.dp, AccentRed.copy(alpha = 0.5f)),
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier
+                                .height(34.dp)
+                                .testTag("unload_model_${model.id}")
+                        ) {
+                            Text("Unload", fontSize = 11.sp)
+                        }
+                    } else {
+                        Button(
+                            onClick = onLoad,
+                            enabled = !isEngineBusy,
+                            colors = ButtonDefaults.buttonColors(containerColor = AccentMint),
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier
+                                .height(34.dp)
+                                .testTag("load_model_${model.id}")
+                        ) {
+                            Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.Black, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Load Model", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }
@@ -694,12 +1261,17 @@ private fun DownloadStatusCard(
     downloadState: DownloadState,
     onPause: () -> Unit,
     onResume: () -> Unit,
-    onCancel: () -> Unit
+    onRetry: () -> Unit,
+    onCancel: () -> Unit,
+    onDiscardPartial: () -> Unit
 ) {
     Surface(
         color = DarkSurface,
         shape = RoundedCornerShape(10.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, AccentBlue),
+        border = BorderStroke(
+            1.dp,
+            if (downloadState is DownloadState.Error) AccentRed else AccentBlue
+        ),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
@@ -767,8 +1339,14 @@ private fun DownloadStatusCard(
                             fontFamily = FontFamily.Monospace
                         )
 
+                        val statusLabel = when {
+                            downloadState.isCancelledResumable -> "Cancelled (Partial saved — Resumable)"
+                            downloadState.isPaused -> "Paused (Resumable)"
+                            else -> "${downloadState.formattedSpeed} • ETA ${downloadState.formattedEta}"
+                        }
+
                         Text(
-                            text = if (downloadState.isPaused) "Paused" else "${downloadState.formattedSpeed} • ETA ${downloadState.formattedEta}",
+                            text = statusLabel,
                             fontSize = 11.sp,
                             color = if (downloadState.isPaused) AccentAmber else TextTertiary,
                             fontFamily = FontFamily.Monospace
@@ -787,37 +1365,57 @@ private fun DownloadStatusCard(
                                 onClick = onResume,
                                 colors = ButtonDefaults.buttonColors(containerColor = AccentMint),
                                 shape = RoundedCornerShape(6.dp),
-                                modifier = Modifier.height(32.dp)
+                                modifier = Modifier
+                                    .height(32.dp)
+                                    .testTag("resume_download_button")
                             ) {
                                 Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.Black, modifier = Modifier.size(14.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text("Resume", color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
+
+                            Spacer(modifier = Modifier.width(8.dp))
+
+                            OutlinedButton(
+                                onClick = onDiscardPartial,
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentRed),
+                                border = BorderStroke(1.dp, AccentRed.copy(alpha = 0.5f)),
+                                shape = RoundedCornerShape(6.dp),
+                                modifier = Modifier.height(32.dp)
+                            ) {
+                                Icon(Icons.Default.Close, contentDescription = null, tint = AccentRed, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Discard", fontSize = 11.sp)
+                            }
                         } else {
                             OutlinedButton(
                                 onClick = onPause,
                                 shape = RoundedCornerShape(6.dp),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, AccentAmber),
-                                modifier = Modifier.height(32.dp)
+                                border = BorderStroke(1.dp, AccentAmber),
+                                modifier = Modifier
+                                    .height(32.dp)
+                                    .testTag("pause_download_button")
                             ) {
                                 Icon(Icons.Default.Pause, contentDescription = null, tint = AccentAmber, modifier = Modifier.size(14.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text("Pause", color = AccentAmber, fontSize = 11.sp)
                             }
-                        }
 
-                        Spacer(modifier = Modifier.width(8.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
 
-                        OutlinedButton(
-                            onClick = onCancel,
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentRed),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, AccentRed.copy(alpha = 0.5f)),
-                            shape = RoundedCornerShape(6.dp),
-                            modifier = Modifier.height(32.dp)
-                        ) {
-                            Icon(Icons.Default.Close, contentDescription = null, tint = AccentRed, modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Cancel", fontSize = 11.sp)
+                            OutlinedButton(
+                                onClick = onCancel,
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentRed),
+                                border = BorderStroke(1.dp, AccentRed.copy(alpha = 0.5f)),
+                                shape = RoundedCornerShape(6.dp),
+                                modifier = Modifier
+                                    .height(32.dp)
+                                    .testTag("cancel_download_button")
+                            ) {
+                                Icon(Icons.Default.Close, contentDescription = null, tint = AccentRed, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Cancel", fontSize = 11.sp)
+                            }
                         }
                     }
                 }
@@ -826,7 +1424,7 @@ private fun DownloadStatusCard(
                         Icon(Icons.Default.Check, contentDescription = null, tint = AccentMint, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Download finished: ${downloadState.file.name}. Registered in local models.",
+                            text = "Download verified & finished: ${downloadState.file.name}. Registered in Room.",
                             fontSize = 12.sp,
                             color = AccentMint
                         )
@@ -836,20 +1434,60 @@ private fun DownloadStatusCard(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.Warning, contentDescription = null, tint = AccentRed, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = downloadState.message,
-                            fontSize = 12.sp,
-                            color = AccentRed,
-                            lineHeight = 16.sp
-                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            if (!downloadState.fileName.isNullOrBlank()) {
+                                Text(
+                                    text = "Download failed: ${downloadState.fileName}",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = AccentRed
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                            }
+                            Text(
+                                text = downloadState.message,
+                                fontSize = 12.sp,
+                                color = AccentRed,
+                                lineHeight = 16.sp
+                            )
+                        }
                     }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedButton(
-                        onClick = onCancel,
-                        shape = RoundedCornerShape(6.dp),
-                        modifier = Modifier.height(30.dp)
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Dismiss", fontSize = 11.sp)
+                        Button(
+                            onClick = onRetry,
+                            colors = ButtonDefaults.buttonColors(containerColor = AccentAmber),
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier
+                                .height(32.dp)
+                                .testTag("retry_download_button")
+                        ) {
+                            Icon(
+                                Icons.Default.Refresh,
+                                contentDescription = null,
+                                tint = Color.Black,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                "Retry",
+                                color = Color.Black,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        OutlinedButton(
+                            onClick = onDiscardPartial,
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.height(32.dp)
+                        ) {
+                            Text("Dismiss", fontSize = 11.sp)
+                        }
                     }
                 }
                 DownloadState.Idle -> {}
@@ -872,7 +1510,7 @@ private fun UrlDownloaderCard(
     Surface(
         color = DarkSurface,
         shape = RoundedCornerShape(12.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, DarkCardBorder),
+        border = BorderStroke(1.dp, DarkCardBorder),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -880,7 +1518,7 @@ private fun UrlDownloaderCard(
                 Icon(Icons.Default.CloudDownload, contentDescription = null, tint = AccentBlue, modifier = Modifier.size(20.dp))
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "Download Model from URL",
+                    text = "Download Custom Model from URL",
                     fontSize = 15.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = TextPrimary
@@ -889,7 +1527,7 @@ private fun UrlDownloaderCard(
 
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "Paste a direct download URL to a .litertlm file. Resumable via HTTP Range headers.",
+                text = "Paste a direct download URL to any other .litertlm file. Supports HTTP Range resume, free-space check, and end-of-download size verification.",
                 fontSize = 12.sp,
                 color = TextSecondary
             )
@@ -920,7 +1558,7 @@ private fun UrlDownloaderCard(
                 value = fileNameInput,
                 onValueChange = { fileNameInput = it },
                 placeholder = {
-                    Text("Optional file name (e.g. gemma-3-1b.litertlm)", color = TextTertiary, fontSize = 12.sp)
+                    Text("Optional file name (e.g. custom-model.litertlm)", color = TextTertiary, fontSize = 12.sp)
                 },
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = AccentBlue,
@@ -934,26 +1572,40 @@ private fun UrlDownloaderCard(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Hugging Face Access Token Toggle
+            // Hugging Face Access Token Toggle (Optional, only for future gated models)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Key, contentDescription = null, tint = if (hasHfToken) AccentMint else TextTertiary, modifier = Modifier.size(16.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(
+                        Icons.Default.Key,
+                        contentDescription = null,
+                        tint = if (hasHfToken) AccentMint else TextTertiary,
+                        modifier = Modifier.size(16.dp)
+                    )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = if (hasHfToken) "Hugging Face Token: Saved Encrypted" else "Hugging Face Token: Optional",
+                        text = if (hasHfToken) {
+                            "Hugging Face Token: Stored Encrypted (Optional, for future gated models)"
+                        } else {
+                            "Hugging Face Token (Optional — only for future gated models)"
+                        },
                         fontSize = 11.sp,
                         color = if (hasHfToken) AccentMint else TextSecondary
                     )
                 }
 
+                Spacer(modifier = Modifier.width(8.dp))
+
                 Button(
                     onClick = { showTokenField = !showTokenField },
                     colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceVariant),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                     shape = RoundedCornerShape(4.dp),
                     modifier = Modifier.height(26.dp)
                 ) {
@@ -967,7 +1619,7 @@ private fun UrlDownloaderCard(
                     value = tokenInput,
                     onValueChange = { tokenInput = it },
                     placeholder = {
-                        Text("hf_...", color = TextTertiary, fontSize = 12.sp)
+                        Text("hf_... (stored with AES-256-GCM, never logged)", color = TextTertiary, fontSize = 12.sp)
                     },
                     visualTransformation = PasswordVisualTransformation(),
                     colors = OutlinedTextFieldDefaults.colors(
@@ -1015,8 +1667,6 @@ private fun UrlDownloaderCard(
                 onClick = {
                     if (urlInput.isNotBlank()) {
                         onStartDownload(urlInput.trim(), fileNameInput.trim().ifBlank { null })
-                        urlInput = ""
-                        fileNameInput = ""
                     }
                 },
                 enabled = urlInput.isNotBlank(),
@@ -1029,118 +1679,7 @@ private fun UrlDownloaderCard(
             ) {
                 Icon(Icons.Default.CloudDownload, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(6.dp))
-                Text("Start Resumable Download", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-            }
-        }
-    }
-}
-
-@Composable
-private fun CuratedCommunityNoteCard() {
-    Surface(
-        color = DarkSurfaceVariant,
-        shape = RoundedCornerShape(8.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, DarkCardBorder),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Text(
-                text = "Where to find LiteRT-LM models:",
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                color = AccentBlue
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = "Visit the LiteRT Community on Hugging Face (search 'litert-lm' or explore google-ai-edge repositories) to find official quantized .litertlm model files. Copy the 'download' or 'resolve' URL and paste it below.",
-                fontSize = 11.sp,
-                color = TextSecondary,
-                lineHeight = 16.sp
-            )
-        }
-    }
-}
-
-@Composable
-private fun CuratedModelCard(
-    curated: CuratedModel,
-    onStartDownload: (url: String) -> Unit
-) {
-    var userUrl by remember { mutableStateOf("") }
-
-    Surface(
-        color = DarkSurface,
-        shape = RoundedCornerShape(10.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, DarkCardBorder),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(modifier = Modifier.padding(14.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = curated.name,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TextPrimary
-                )
-                Text(
-                    text = curated.approximateSize,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = AccentMint,
-                    fontFamily = FontFamily.Monospace
-                )
-            }
-
-            Spacer(modifier = Modifier.height(4.dp))
-
-            Text(
-                text = curated.description,
-                fontSize = 12.sp,
-                color = TextSecondary,
-                lineHeight = 16.sp
-            )
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            OutlinedTextField(
-                value = userUrl,
-                onValueChange = { userUrl = it },
-                placeholder = {
-                    Text("Paste direct .litertlm URL for ${curated.name}...", color = TextTertiary, fontSize = 11.sp)
-                },
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = AccentBlue,
-                    unfocusedBorderColor = DarkCardBorder,
-                    focusedTextColor = TextPrimary,
-                    unfocusedTextColor = TextPrimary
-                ),
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Button(
-                onClick = {
-                    if (userUrl.isNotBlank()) {
-                        onStartDownload(userUrl.trim())
-                        userUrl = ""
-                    }
-                },
-                enabled = userUrl.isNotBlank(),
-                colors = ButtonDefaults.buttonColors(containerColor = AccentMint),
-                shape = RoundedCornerShape(6.dp),
-                modifier = Modifier
-                    .align(Alignment.End)
-                    .height(34.dp)
-            ) {
-                Icon(Icons.Default.CloudDownload, contentDescription = null, tint = Color.Black, modifier = Modifier.size(14.dp))
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("Download this model", color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Text("Start / Resume Download", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 13.sp)
             }
         }
     }

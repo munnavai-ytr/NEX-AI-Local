@@ -18,11 +18,14 @@ import com.example.data.DatasetExampleEntity
 import com.example.data.MemoryFactEntity
 import com.example.data.ModelEntity
 import com.example.data.ProjectFolderEntity
+import com.example.data.StarterCatalogModel
+import com.example.data.StarterModelCatalog
 import com.example.inference.EngineManager
 import com.example.inference.EngineStatus
 import com.example.inference.GenerationEvent
 import com.example.inference.GenerationStats
 import com.example.util.DeviceProtectionManager
+import com.example.util.DownloadMetadata
 import com.example.util.DownloadState
 import com.example.util.EncryptedTokenStorage
 import com.example.util.ImportProgress
@@ -98,7 +101,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val datasetDao = db.datasetDao()
 
     private val engineManager = EngineManager.getInstance(application)
-    private val downloadManager = ModelDownloadManager(application)
+    private val downloadManager = ModelDownloadManager.getInstance(application)
 
     // Chat messages
     val messages: StateFlow<List<ChatMessageEntity>> = chatDao.getAllMessages()
@@ -160,6 +163,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val useGpuSetting: StateFlow<Boolean> = engineManager.useGpuSetting
 
     val downloadState: StateFlow<DownloadState> = downloadManager.downloadState
+    val wifiOnlyDownload: StateFlow<Boolean> = downloadManager.wifiOnly
 
     private val _importProgress = MutableStateFlow<ImportProgress?>(null)
     val importProgress: StateFlow<ImportProgress?> = _importProgress.asStateFlow()
@@ -272,13 +276,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             for (file in filesOnDisk) {
                 val exists = modelDao.getModelByPath(file.absolutePath) != null
                 if (!exists) {
-                    val entity = ModelEntity(
-                        name = file.nameWithoutExtension,
-                        filePath = file.absolutePath,
-                        sizeBytes = file.length(),
-                        downloadUrl = "",
-                        isCurated = false
-                    )
+                    val size = file.length()
+                    val catalogMatch = StarterModelCatalog.MODELS.firstOrNull {
+                        it.fileName.equals(file.name, ignoreCase = true)
+                    }
+                    val entity = if (catalogMatch != null) {
+                        ModelEntity(
+                            name = catalogMatch.name,
+                            filePath = file.absolutePath,
+                            sizeBytes = size,
+                            downloadUrl = catalogMatch.downloadUrl,
+                            isCurated = true,
+                            tier = catalogMatch.tier,
+                            minRamGb = catalogMatch.minRamGb,
+                            recommendedRamGb = catalogMatch.recommendedRamGb,
+                            task = catalogMatch.task,
+                            licenseNote = catalogMatch.license,
+                            requiresLicenseAcceptance = catalogMatch.requiresLicenseAcceptance,
+                            sourceLink = catalogMatch.downloadUrl
+                        )
+                    } else {
+                        ModelEntity(
+                            name = file.name,
+                            filePath = file.absolutePath,
+                            sizeBytes = size,
+                            downloadUrl = "",
+                            isCurated = false,
+                            tier = ModelEntity.inferTier(size),
+                            minRamGb = ModelEntity.inferMinRamGb(size),
+                            recommendedRamGb = ModelEntity.inferRecommendedRamGb(size)
+                        )
+                    }
                     modelDao.insertModel(entity)
                 }
             }
@@ -470,6 +498,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 batteryTempCelsius = temp
                             )
                             benchmarkDao.insert(res)
+                            if (tokensPerSec > 0.0) {
+                                modelDao.updateMeasuredSpeed(model.filePath, tokensPerSec)
+                            }
                             deferred.complete(Result.success(res))
                         }
                         is GenerationEvent.Error -> {
@@ -778,9 +809,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         engineManager.setUseGpu(enabled)
     }
 
-    fun loadModel(filePath: String, useGpu: Boolean = useGpuSetting.value) {
-        viewModelScope.launch {
+    fun selectModel(filePath: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            modelDao.clearLastUsed()
             modelDao.setLastUsed(filePath)
+            _snackbarMessage.emit("Model selected as active default.")
+        }
+    }
+
+    fun loadModel(filePath: String, useGpu: Boolean = useGpuSetting.value) {
+        viewModelScope.launch(Dispatchers.IO) {
+            modelDao.clearLastUsed()
+            modelDao.setLastUsed(filePath)
+            modelDao.clearLoaded()
+            modelDao.setLoaded(filePath)
             engineManager.loadModel(filePath, useGpu)
         }
     }
@@ -791,17 +833,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun unloadModel() {
-        engineManager.unloadModel()
+        viewModelScope.launch(Dispatchers.IO) {
+            modelDao.clearLoaded()
+            engineManager.unloadModel()
+        }
     }
 
     fun deleteModel(model: ModelEntity) {
         viewModelScope.launch(Dispatchers.IO) {
-            if (model.isLoaded) {
+            val status = engineStatus.value
+            if (model.isLoaded || (status is EngineStatus.Ready && status.modelName == model.name)) {
+                modelDao.clearLoaded()
                 engineManager.unloadModel()
             }
             val file = File(model.filePath)
             if (file.exists()) {
                 file.delete()
+            }
+            val partFile = File("${model.filePath}.part")
+            if (partFile.exists()) {
+                partFile.delete()
             }
             modelDao.deleteModel(model.id)
             _snackbarMessage.emit("Model '${model.name}' deleted.")
@@ -819,7 +870,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
             _importProgress.value = null
             result.onSuccess { file ->
-                _snackbarMessage.emit("Imported '${file.name}' successfully.")
+                _snackbarMessage.emit("Imported '${file.name}' into models folder.")
             }.onFailure { error ->
                 _snackbarMessage.emit("Import failed: ${error.message}")
             }
@@ -828,13 +879,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun importModelFromUri(uri: Uri) = importModelFromFile(uri)
 
-    fun startDownload(url: String, customFileName: String? = null, hfToken: String? = null) {
+    fun setWifiOnlyDownload(enabled: Boolean) {
+        downloadManager.setWifiOnly(enabled)
+    }
+
+    fun installStarterModel(catalogModel: StarterCatalogModel) {
+        downloadManager.startDownload(
+            url = catalogModel.downloadUrl,
+            customFileName = catalogModel.fileName,
+            metadata = catalogModel.toDownloadMetadata()
+        )
+    }
+
+    fun startDownload(
+        url: String,
+        customFileName: String? = null,
+        hfToken: String? = null,
+        metadata: DownloadMetadata = DownloadMetadata()
+    ) {
         viewModelScope.launch {
             if (!hfToken.isNullOrBlank()) {
                 EncryptedTokenStorage.saveToken(getApplication(), hfToken)
                 _hasHfToken.value = true
             }
-            downloadManager.startDownload(url, customFileName)
+            downloadManager.startDownload(url, customFileName, metadata)
         }
     }
 
@@ -846,14 +914,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         downloadManager.resumeDownload()
     }
 
-    fun cancelDownload() {
-        downloadManager.cancelDownload()
+    fun retryDownload() {
+        downloadManager.retryDownload()
+    }
+
+    fun cancelDownload(deletePartial: Boolean = false) {
+        downloadManager.cancelDownload(deletePartial)
     }
 
     fun saveHfToken(token: String) {
         EncryptedTokenStorage.saveToken(getApplication(), token)
-        _hasHfToken.value = true
-        showToast("HuggingFace token saved.")
+        _hasHfToken.value = token.isNotBlank()
+        showToast(if (token.isNotBlank()) "HuggingFace token saved." else "HuggingFace token cleared.")
     }
 
     // Feedback rating on message
@@ -1153,17 +1225,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                     if (collectedText.isNotEmpty()) {
                         val (thinkingContent, answerContent) = MarkdownHelper.parseThinking(collectedText)
+                        val tps = statsToSave?.tokensPerSecond ?: 0.0
                         val assistantMsg = ChatMessageEntity(
                             role = "assistant",
                             content = answerContent.ifEmpty { collectedText },
                             thinking = thinkingContent,
-                            tokensPerSecond = statsToSave?.tokensPerSecond ?: 0.0,
+                            tokensPerSecond = tps,
                             modelLoadTimeMs = statsToSave?.loadTimeMs ?: 0L,
                             timeToFirstTokenMs = statsToSave?.timeToFirstTokenMs ?: 0L,
                             backendUsed = statsToSave?.backend,
                             sources = sourcesString
                         )
                         chatDao.insertMessage(assistantMsg)
+                        if (tps > 0.0) {
+                            lastUsedModel.value?.filePath?.let { path ->
+                                modelDao.updateMeasuredSpeed(path, tps)
+                            }
+                        }
                     }
 
                 } catch (t: Throwable) {

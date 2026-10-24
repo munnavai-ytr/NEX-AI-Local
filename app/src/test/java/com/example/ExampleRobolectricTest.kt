@@ -152,4 +152,59 @@ class ExampleRobolectricTest {
     assertEquals("EngineManager.kt", results.first().fileName)
     assertEquals("EngineManager.kt (lines 1–50)", results.first().toDisplayString())
   }
+
+  @Test
+  fun `starter model catalog contains the three required models with exact urls and metadata`() {
+    val models = com.example.data.StarterModelCatalog.MODELS
+    assertEquals(3, models.size)
+
+    val qwen3 = models[0]
+    assertEquals("Qwen3 0.6B", qwen3.name)
+    assertEquals("Tiny", qwen3.tier)
+    assertEquals(3.0, qwen3.minRamGb, 0.01)
+    assertEquals("chat", qwen3.task)
+    assertEquals("Apache-2.0", qwen3.license)
+    assertEquals(
+      "https://huggingface.co/litert-community/Qwen3-0.6B/resolve/main/Qwen3-0.6B.litertlm",
+      qwen3.downloadUrl
+    )
+    assertFalse(qwen3.requiresHfToken)
+
+    val qwen25 = models[1]
+    assertEquals("Qwen2.5 1.5B Instruct", qwen25.name)
+    assertEquals("Small", qwen25.tier)
+    assertEquals(4.0, qwen25.minRamGb, 0.01)
+    assertEquals("chat", qwen25.task)
+    assertEquals("Apache-2.0", qwen25.license)
+    assertEquals(
+      "https://huggingface.co/litert-community/Qwen2.5-1.5B-Instruct/resolve/main/Qwen2.5-1.5B-Instruct_multi-prefill-seq_q8_ekv4096.litertlm",
+      qwen25.downloadUrl
+    )
+    assertFalse(qwen25.requiresHfToken)
+
+    val gemma4 = models[2]
+    assertEquals("Gemma 4 E2B", gemma4.name)
+    assertEquals("Medium", gemma4.tier)
+    assertEquals(6.0, gemma4.minRamGb, 0.01)
+    assertEquals("chat and code", gemma4.task)
+    assertEquals("Apache-2.0", gemma4.license)
+    assertEquals(
+      "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm",
+      gemma4.downloadUrl
+    )
+    assertFalse(gemma4.requiresHfToken)
+  }
+
+  @Test
+  fun `wifi only download setting is on by default and can be toggled`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val manager = ModelDownloadManager(context)
+    assertTrue(manager.wifiOnly.value)
+
+    manager.setWifiOnly(false)
+    assertFalse(manager.wifiOnly.value)
+
+    manager.setWifiOnly(true)
+    assertTrue(manager.wifiOnly.value)
+  }
 }

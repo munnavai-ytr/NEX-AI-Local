@@ -30,6 +30,15 @@ interface ModelDao {
     @Query("UPDATE local_models SET isLastUsed = 1 WHERE filePath = :path")
     suspend fun setLastUsed(path: String)
 
+    @Query("UPDATE local_models SET isLoaded = 0")
+    suspend fun clearLoaded()
+
+    @Query("UPDATE local_models SET isLoaded = 1 WHERE filePath = :path")
+    suspend fun setLoaded(path: String)
+
+    @Query("UPDATE local_models SET measuredTokensPerSecond = :tokensPerSec WHERE filePath = :path")
+    suspend fun updateMeasuredSpeed(path: String, tokensPerSec: Double)
+
     @Query("DELETE FROM local_models WHERE id = :id")
     suspend fun deleteModel(id: Long)
 

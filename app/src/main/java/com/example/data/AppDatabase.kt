@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [
@@ -15,7 +17,7 @@ import androidx.room.RoomDatabase
         BenchmarkResultEntity::class,
         DatasetExampleEntity::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -30,6 +32,19 @@ abstract class AppDatabase : RoomDatabase() {
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE local_models ADD COLUMN tier TEXT NOT NULL DEFAULT 'Small'")
+                db.execSQL("ALTER TABLE local_models ADD COLUMN minRamGb REAL NOT NULL DEFAULT 2.0")
+                db.execSQL("ALTER TABLE local_models ADD COLUMN recommendedRamGb REAL NOT NULL DEFAULT 4.0")
+                db.execSQL("ALTER TABLE local_models ADD COLUMN task TEXT NOT NULL DEFAULT 'chat'")
+                db.execSQL("ALTER TABLE local_models ADD COLUMN licenseNote TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE local_models ADD COLUMN requiresLicenseAcceptance INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE local_models ADD COLUMN sourceLink TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE local_models ADD COLUMN measuredTokensPerSecond REAL NOT NULL DEFAULT 0.0")
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -37,8 +52,9 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "nex_ai_local.db"
                 )
-                .fallbackToDestructiveMigration(true)
-                .build()
+                    .addMigrations(MIGRATION_6_7)
+                    .fallbackToDestructiveMigration(true)
+                    .build()
                 INSTANCE = instance
                 instance
             }

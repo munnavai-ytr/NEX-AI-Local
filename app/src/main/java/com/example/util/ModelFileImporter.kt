@@ -78,21 +78,46 @@ object ModelFileImporter {
                 }
             } ?: return@withContext Result.failure(Exception("Unable to read selected file"))
 
-            // Register in Room Database
+            val finalLength = targetFile.length()
+            if (fileSize > 0 && finalLength != fileSize) {
+                targetFile.delete()
+                return@withContext Result.failure(
+                    Exception("Corrupted import: expected $fileSize bytes but copied $finalLength bytes")
+                )
+            }
+
+            // Register in Room Database with inferred catalog defaults
             val db = AppDatabase.getInstance(context)
             val modelDao = db.modelDao()
             val existing = modelDao.getModelByPath(targetFile.absolutePath)
+            val inferredTier = ModelEntity.inferTier(finalLength)
+            val inferredMinRam = ModelEntity.inferMinRamGb(finalLength)
+            val inferredRecRam = ModelEntity.inferRecommendedRamGb(finalLength)
+            val inferredTask = if (targetFile.name.contains("code", ignoreCase = true) ||
+                targetFile.name.contains("qwen", ignoreCase = true)
+            ) "code" else "chat"
+
             if (existing == null) {
                 modelDao.insertModel(
                     ModelEntity(
                         name = targetFile.name,
                         filePath = targetFile.absolutePath,
-                        sizeBytes = targetFile.length()
+                        sizeBytes = finalLength,
+                        tier = inferredTier,
+                        minRamGb = inferredMinRam,
+                        recommendedRamGb = inferredRecRam,
+                        task = inferredTask,
+                        sourceLink = "Local SAF Import"
                     )
                 )
             } else {
                 modelDao.updateModel(
-                    existing.copy(sizeBytes = targetFile.length())
+                    existing.copy(
+                        sizeBytes = finalLength,
+                        tier = inferredTier,
+                        minRamGb = inferredMinRam,
+                        recommendedRamGb = inferredRecRam
+                    )
                 )
             }
 
