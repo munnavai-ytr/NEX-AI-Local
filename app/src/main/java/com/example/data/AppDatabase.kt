@@ -15,9 +15,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ProjectFolderEntity::class,
         CodeChunkEntity::class,
         BenchmarkResultEntity::class,
-        DatasetExampleEntity::class
+        DatasetExampleEntity::class,
+        ApiKeyEntity::class
     ],
-    version = 7,
+    version = 8,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -27,6 +28,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun projectDao(): ProjectDao
     abstract fun benchmarkDao(): BenchmarkDao
     abstract fun datasetDao(): DatasetDao
+    abstract fun apiKeyDao(): ApiKeyDao
 
     companion object {
         @Volatile
@@ -45,6 +47,23 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `api_keys` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `modelId` TEXT NOT NULL,
+                        `label` TEXT NOT NULL,
+                        `hash` TEXT NOT NULL,
+                        `prefix` TEXT NOT NULL,
+                        `createdAt` INTEGER NOT NULL,
+                        `lastUsedAt` INTEGER NOT NULL
+                    )
+                """)
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_api_keys_modelId` ON `api_keys` (`modelId`)")
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -52,7 +71,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "nex_ai_local.db"
                 )
-                    .addMigrations(MIGRATION_6_7)
+                    .addMigrations(MIGRATION_6_7, MIGRATION_7_8)
                     .fallbackToDestructiveMigration(true)
                     .build()
                 INSTANCE = instance

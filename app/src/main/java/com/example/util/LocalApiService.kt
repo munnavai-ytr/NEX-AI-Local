@@ -43,7 +43,8 @@ class LocalApiService : Service() {
 
     private fun startServer() {
         val engineManager = EngineManager.getInstance(this)
-        serverInstance = LocalApiServer(engineManager)
+        val apiKeyDao = com.example.data.AppDatabase.getInstance(this).apiKeyDao()
+        serverInstance = LocalApiServer(engineManager, apiKeyDao)
         serverInstance?.start()
     }
 

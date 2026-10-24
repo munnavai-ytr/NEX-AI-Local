@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -43,6 +44,8 @@ import com.example.ui.MainViewModel
 import com.example.ui.MemoryScreen
 import com.example.ui.ModelsScreen
 import com.example.ui.SettingsScreen
+import com.example.ui.TerminalScreen
+import com.example.ui.TerminalViewModel
 import com.example.ui.theme.AccentBlue
 import com.example.ui.theme.AccentMint
 import com.example.ui.theme.DarkSurface
@@ -51,12 +54,13 @@ import com.example.ui.theme.TextSecondary
 import com.example.ui.theme.TextTertiary
 
 enum class ScreenTab {
-    CHAT, DATASET, MEMORY, BENCHMARK, MODELS, SETTINGS
+    CHAT, DATASET, MEMORY, BENCHMARK, MODELS, TERMINAL, SETTINGS
 }
 
 class MainActivity : ComponentActivity() {
 
     private val viewModel: MainViewModel by viewModels()
+    private val terminalViewModel: TerminalViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -64,14 +68,20 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             MyApplicationTheme {
-                MainAppContent(viewModel = viewModel)
+                MainAppContent(
+                    viewModel = viewModel,
+                    terminalViewModel = terminalViewModel
+                )
             }
         }
     }
 }
 
 @Composable
-fun MainAppContent(viewModel: MainViewModel) {
+fun MainAppContent(
+    viewModel: MainViewModel,
+    terminalViewModel: TerminalViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+) {
     var currentTab by remember { mutableStateOf(ScreenTab.CHAT) }
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -210,6 +220,21 @@ fun MainAppContent(viewModel: MainViewModel) {
                 )
 
                 NavigationBarItem(
+                    selected = currentTab == ScreenTab.TERMINAL,
+                    onClick = { currentTab = ScreenTab.TERMINAL },
+                    icon = { Icon(Icons.Default.Terminal, contentDescription = "Terminal") },
+                    label = { Text("Terminal", fontSize = 10.sp) },
+                    colors = NavigationBarItemDefaults.colors(
+                        selectedIconColor = Color.Black,
+                        selectedTextColor = AccentMint,
+                        indicatorColor = AccentMint,
+                        unselectedIconColor = TextTertiary,
+                        unselectedTextColor = TextSecondary
+                    ),
+                    modifier = Modifier.testTag("nav_tab_terminal")
+                )
+
+                NavigationBarItem(
                     selected = currentTab == ScreenTab.SETTINGS,
                     onClick = { currentTab = ScreenTab.SETTINGS },
                     icon = { Icon(Icons.Default.Settings, contentDescription = "Settings") },
@@ -291,6 +316,12 @@ fun MainAppContent(viewModel: MainViewModel) {
                     importProgress = importProgress,
                     hasHfToken = hasHfToken,
                     onNavigateToChat = { currentTab = ScreenTab.CHAT },
+                    modifier = Modifier.padding(innerPadding)
+                )
+            }
+            ScreenTab.TERMINAL -> {
+                TerminalScreen(
+                    terminalViewModel = terminalViewModel,
                     modifier = Modifier.padding(innerPadding)
                 )
             }

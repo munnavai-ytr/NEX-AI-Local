@@ -32,7 +32,8 @@ data class DownloadMetadata(
     val task: String = "chat",
     val licenseNote: String = "",
     val requiresLicenseAcceptance: Boolean = false,
-    val isCurated: Boolean = false
+    val isCurated: Boolean = false,
+    val expectedSizeBytes: Long = -1L
 )
 
 sealed interface DownloadState {
@@ -268,22 +269,27 @@ class ModelDownloadManager(context: Context) {
             // Will check during GET
         }
 
+        if (totalBytes <= 0 && metadata.expectedSizeBytes > 0) {
+            totalBytes = metadata.expectedSizeBytes
+        }
+
         // If partial file is somehow larger than server file size, reset corrupted partial file
         if (totalBytes > 0 && existingBytes > totalBytes) {
             partFile.delete()
             existingBytes = 0L
         }
 
-        // 2. Check free storage before starting
+        // 2. Check free storage before starting (model size + 500 MB safety buffer)
         val statFs = StatFs(modelsDir.path)
         val availableDiskBytes = statFs.availableBytes
         val requiredBytes = if (totalBytes > 0) (totalBytes - existingBytes).coerceAtLeast(0L) else 100L * 1024L * 1024L
+        val storageBufferBytes = 500L * 1024L * 1024L
 
-        if (availableDiskBytes < requiredBytes + (50L * 1024L * 1024L)) {
+        if (availableDiskBytes < requiredBytes + storageBufferBytes) {
             val reqMb = requiredBytes / (1024 * 1024)
             val availMb = availableDiskBytes / (1024 * 1024)
             _downloadState.value = DownloadState.Error(
-                message = "Not enough storage space: download requires ${reqMb} MB (+50 MB buffer), but only ${availMb} MB is free.",
+                message = "Not enough storage space: download requires ${reqMb} MB (+500 MB buffer), but only ${availMb} MB is free.",
                 fileName = fileName,
                 url = urlString
             )
@@ -358,11 +364,11 @@ class ModelDownloadManager(context: Context) {
             // Re-verify free storage if totalBytes was only discovered on GET
             if (totalBytes > 0) {
                 val remainingNeeded = (totalBytes - existingBytes).coerceAtLeast(0L)
-                if (statFs.availableBytes < remainingNeeded + (50L * 1024L * 1024L)) {
+                if (statFs.availableBytes < remainingNeeded + storageBufferBytes) {
                     val reqMb = remainingNeeded / (1024 * 1024)
                     val availMb = statFs.availableBytes / (1024 * 1024)
                     _downloadState.value = DownloadState.Error(
-                        message = "Not enough storage space: download requires ${reqMb} MB, but only ${availMb} MB is free.",
+                        message = "Not enough storage space: download requires ${reqMb} MB (+500 MB buffer), but only ${availMb} MB is free.",
                         fileName = fileName,
                         url = urlString
                     )

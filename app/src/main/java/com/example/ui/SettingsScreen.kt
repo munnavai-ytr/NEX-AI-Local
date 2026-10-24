@@ -41,8 +41,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ui.theme.AccentBlue
 import com.example.ui.theme.AccentMint
 import com.example.ui.theme.AccentRed
@@ -66,6 +68,8 @@ fun SettingsScreen(
     val maxMemoryMb = runtime.maxMemory() / (1024 * 1024)
 
     var promptInput by remember(systemPrompt) { mutableStateOf(systemPrompt) }
+    var hfTokenInput by remember { mutableStateOf("") }
+    val hasHfToken by viewModel.hasHfToken.collectAsStateWithLifecycle()
 
     LazyColumn(
         modifier = modifier
@@ -439,6 +443,105 @@ fun SettingsScreen(
                             checked = viewModel.localApiEnabled,
                             onCheckedChange = { viewModel.setLocalApiEnabled(it) }
                         )
+                    }
+                }
+            }
+        }
+
+        // Hugging Face Access Token (Optional, for gated repos)
+        item {
+            Surface(
+                color = DarkSurface,
+                shape = RoundedCornerShape(12.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, DarkCardBorder),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Security,
+                            contentDescription = null,
+                            tint = AccentBlue,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Hugging Face Access Token (Optional)",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = TextPrimary
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = if (hasHfToken) {
+                            "Encrypted token is saved via Android KeyStore. Used only for gated repositories."
+                        } else {
+                            "Only needed for gated Hugging Face models. Stored encrypted with Android KeyStore and never logged."
+                        },
+                        fontSize = 12.sp,
+                        color = if (hasHfToken) AccentMint else TextSecondary,
+                        lineHeight = 16.sp
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    OutlinedTextField(
+                        value = hfTokenInput,
+                        onValueChange = { hfTokenInput = it },
+                        placeholder = {
+                            Text(
+                                text = if (hasHfToken) "hf_•••••••••••••••• (saved)" else "Paste hf_... token for gated repos",
+                                fontSize = 12.sp,
+                                color = TextTertiary
+                            )
+                        },
+                        visualTransformation = PasswordVisualTransformation(),
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = AccentBlue,
+                            unfocusedBorderColor = DarkCardBorder,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("settings_hf_token_input")
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                viewModel.saveHfToken(hfTokenInput.trim())
+                                hfTokenInput = ""
+                            },
+                            enabled = hfTokenInput.isNotBlank(),
+                            colors = ButtonDefaults.buttonColors(containerColor = AccentBlue),
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(36.dp)
+                                .testTag("settings_save_hf_token_button")
+                        ) {
+                            Text("Save Token", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                        if (hasHfToken) {
+                            OutlinedButton(
+                                onClick = {
+                                    viewModel.saveHfToken("")
+                                    hfTokenInput = ""
+                                },
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentRed),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, AccentRed.copy(alpha = 0.5f)),
+                                shape = RoundedCornerShape(6.dp),
+                                modifier = Modifier
+                                    .height(36.dp)
+                                    .testTag("settings_clear_hf_token_button")
+                            ) {
+                                Text("Clear", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
                     }
                 }
             }
