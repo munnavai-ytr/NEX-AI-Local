@@ -1,0 +1,6 @@
+{
+  "name": "NEX AI Local",
+  "description": "Fully offline, on-device AI assistant for chat and software development powered by Google LiteRT-LM.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
